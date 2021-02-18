@@ -1,0 +1,56 @@
+#!/bin/sh
+
+#
+# Test adding 1 or more encrypted devices
+#
+
+cat >$CONFIG <<EOF
+dm_crypt.1.path = "/dev/mmcblk0p5"
+dm_crypt.1.name = "app"
+dm_crypt.1.cipher = "aes-cbc-plain"
+dm_crypt.1.secret = "8e9c0780fd7f5d00c18a30812fe960cfce71f6074dd9cded6aab2897568cc856"
+
+dm_crypt.2.path = "/dev/mmcblk0p6"
+dm_crypt.2.name = "provisioning"
+dm_crypt.2.cipher = "aes-cbc-plain"
+dm_crypt.2.secret = "4e9c781fd7f5d00c18a30812fe970cfce56f6064dd9cded6aab2897575cc861"
+EOF
+
+
+cat >$EXPECTED <<EOF
+fixture: mkdir("/mnt", 755)
+fixture: mkdir("/dev", 755)
+fixture: mkdir("/sys", 555)
+fixture: mkdir("/proc", 555)
+fixture: mount("devtmpfs", "/dev", "devtmpfs", 10, data)
+fixture: mount("sysfs", "/sys", "sysfs", 14, data)
+fixture: mount("proc", "/proc", "proc", 14, data)
+fixture: mount("/dev/mmcblk0p2", "/mnt", "squashfs", 1, data)
+fixture: symlink("/dev/mmcblk0","/dev/rootdisk0")
+fixture: symlink("/dev/mmcblk0p6","/dev/rootdisk0p6")
+fixture: symlink("/dev/mmcblk0p5","/dev/rootdisk0p5")
+fixture: symlink("/dev/mmcblk0p2","/dev/rootdisk0p2")
+fixture: symlink("/dev/mmcblk0p1","/dev/rootdisk0p1")
+nerves_initramfs: mapping other encrypted block device /dev/mmcblk0p5
+fixture: ioctl(LOOP_SET_FD)
+fixture: ioctl(DM_DEV_CREATE, data_size=16384, data_start=312, target_count=0, open_count=0, flags=0, event_nr=0, dev=0x0, name=app, uuid=CRYPT-PLAIN-app
+fixture: ioctl(DM_TABLE_LOAD, data_size=16384, data_start=312, target_count=1, open_count=0, flags=32768, event_nr=0, dev=0x0, name=app, uuid=, target=0,327680,crypt (aes-cbc-plain 8e9c0780fd7f5d00c18a30812fe960cfce71f6074dd9cded6aab2897568cc856 1 /dev/loop1 0)
+fixture: ioctl(DM_DEV_SUSPEND, data_size=16384, data_start=312, target_count=0, open_count=0, flags=32768, event_nr=0, dev=0x0, name=app, uuid=
+fixture: symlink("/dev/mapper/app", "/dev/dm-1")
+nerves_initramfs: mapping other encrypted block device /dev/mmcblk0p6
+fixture: ioctl(LOOP_SET_FD)
+fixture: ioctl(DM_DEV_CREATE, data_size=16384, data_start=312, target_count=0, open_count=0, flags=0, event_nr=0, dev=0x0, name=provisioning, uuid=CRYPT-PLAIN-provisioning
+fixture: ioctl(DM_TABLE_LOAD, data_size=16384, data_start=312, target_count=1, open_count=0, flags=32768, event_nr=0, dev=0x0, name=provisioning, uuid=, target=0,393216,crypt (aes-cbc-plain 4e9c781fd7f5d00c18a30812fe970cfce56f6064dd9cded6aab2897575cc861 2 /dev/loop2 0)
+fixture: ioctl(DM_DEV_SUSPEND, data_size=16384, data_start=312, target_count=0, open_count=0, flags=32768, event_nr=0, dev=0x0, name=provisioning, uuid=
+fixture: symlink("/dev/mapper/provisioning", "/dev/dm-2")
+fixture: mount("/dev", "/mnt/dev", "(null)", 8192, data)
+fixture: umount("/sys")
+fixture: umount("/proc")
+fixture: unlinkat("bin", AT_REMOVEDIR)
+fixture: unlinkat("usr", AT_REMOVEDIR)
+fixture: rmdir("/sys")
+fixture: rmdir("/proc")
+fixture: mount(".", "/", "(null)", 8192, data)
+fixture: chroot(.)
+Hello from the chained /sbin/init
+EOF

@@ -19,12 +19,14 @@ fixture: mount("proc", "/proc", "proc", 14, data)
 /dev/mmcblk0p1: PARTUUID="5278721d-0089-4768-85df-b8f1b97e6684"
 /dev/mmcblk0p2: PARTUUID="fcc205c8-2f1c-4dcd-bef4-7b209aa15cca"
 /dev/mmcblk0p5: PARTUUID="7e7b6f06-8aaf-42c6-9c3b-6ede014885a6"
+/dev/mmcblk0p6: PARTUUID="14e534d0-7adc-4b8e-a208-460104c3c24a"
 /dev/mmcblk0: DISKUUID="b443fbeb-2c93-481b-88b3-0ecb0aeba911"
 /dev/sda1: PARTUUID="3fc3e2d4-01"
 /dev/sda2: PARTUUID="3fc3e2d4-02"
 /dev/sda: DISKUUID="3fc3e2d4"
 fixture: mount("/dev/mmcblk0p2", "/mnt", "squashfs", 1, data)
 fixture: symlink("/dev/mmcblk0","/dev/rootdisk0")
+fixture: symlink("/dev/mmcblk0p6","/dev/rootdisk0p6")
 fixture: symlink("/dev/mmcblk0p5","/dev/rootdisk0p5")
 fixture: symlink("/dev/mmcblk0p2","/dev/rootdisk0p2")
 fixture: symlink("/dev/mmcblk0p1","/dev/rootdisk0p1")

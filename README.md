@@ -67,6 +67,11 @@ uboot_env.modified | True if something has modified the U-Boot block and it diff
 uboot_env.start    | The block offset of the U-Boot environment. (512 byte blocks)
 uboot_env.count    | The number of blocks in the environment. Defaults to 256.
 run_repl           | True to run a REPL before booting. This is useful for debug. Defaults to `false`
+dm_crypt.n.path    | The extra encrypted filesystem path.Where `n` is the index of the extra filesystem.
+dm_crypt.n.cipher  | The cipher used to encrypt the extra filesystem. Where `n` is the index of the extra filesystem.
+dm_crypt.n.secret  | The secret key as hex digits for the extra filesystem. Where `n` is the index of the extra filesystem.
+
+_for more information about configuring extra encrypted filesystems see [Mounting extra encrypted filesystems](#mounting-extra-encrypted-file-systems)_
 
 Variables can be overridden using the Linux commandline. See your platform's
 bootloader documentation for how to pass options to Linux. At the end of the
@@ -242,3 +247,22 @@ This is illustrative, but obviously quite insecure. The current route to
 obtaining the secret key is to edit the C code to this project to integrate it
 with platform-specific way of keeping or hiding secrets. It is hoped that
 alternatives can be shared in the future.
+
+### Mounting extra encrypted file systems
+
+If you want to mount more encrypted file systems outside of the `rootfs` you
+can use the `dm_crypt` variable to configure the extra filesystems. The
+`dm_crypt` variable works using a number to under the `dm_crypt` variable
+namespace like so: `dm_crypt.n.path`.
+
+Here's an example configuration file with configuration two more filesystems:
+
+```config
+dm_crypt.1.path = "/dev/mmcblk0p3"
+dm_crypt.1.cipher = "aes-cbc-plain"
+dm_crypt.1.secret = "8e9c0780fd7f5d00c18a30812fe960cfce71f6074dd9cded6aab2897568cc856"
+
+dm_crypt.1.path = "/dev/mmcblk0p4"
+dm_crypt.2.cipher = "aes-cbc-plain"
+dm_crypt.2.secret = "4e9c781fd7f5d00c18a30812fe970cfce56f6064dd9cded6aab2897575cc861"
+```

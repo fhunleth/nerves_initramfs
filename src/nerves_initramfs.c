@@ -21,22 +21,31 @@
 #include "block_device.h"
 #include "rootdisk.h"
 
+#define MAX_EXTRA_ENCRYPTED_DEVS 8
+
 // Global U-Boot environment data
 struct uboot_env working_uboot_env;
 
-static int losetup(int rootfs_fd)
+static int losetup(int rootfs_fd, int loop_ix)
 {
+    char loop_devname[16];
+    snprintf(loop_devname, sizeof(loop_devname), "/dev/loop%d", loop_ix);
+
     // Assume loop0 is available since who else would be able to take it?
-    int loop_fd = open("/dev/loop0", O_RDONLY);
+    int loop_fd = open(loop_devname, O_RDONLY);
     if (loop_fd < 0)
-        fatal("Enable CONFIG_BLK_DEV_LOOP in kernel");
+        fatal("Enable CONFIG_BLK_DEV_LOOP in kernel and check that at least %d loop devices", loop_ix + 1);
 
     OK_OR_FATAL(ioctl(loop_fd, LOOP_SET_FD, rootfs_fd), "LOOP_SET_FD failed");
 
     return loop_fd;
 }
 
-static int dm_create(off_t rootfs_blocks, const char *cipher, const char *secret)
+static int dm_create(int map_ix,
+                     const char *name,
+                     off_t rootfs_blocks,
+                     const char *cipher,
+                     const char *secret)
 {
     int dm_control = open("/dev/mapper/control", O_RDWR);
 
@@ -54,8 +63,8 @@ static int dm_create(off_t rootfs_blocks, const char *cipher, const char *secret
     dm->flags = 0;
     dm->event_nr = 0;
     dm->dev = 0;
-    strcpy(dm->name, "rootfs");
-    strcpy(dm->uuid, "CRYPT-PLAIN-rootfs");
+    strcpy(dm->name, name);
+    snprintf(dm->uuid, sizeof(dm->uuid), "CRYPT-PLAIN-%s", name);
 
     OK_OR_FATAL(ioctl(dm_control, DM_DEV_CREATE, request_buffer), "Enable CONFIG_DM_CRYPT in kernel");
 
@@ -69,13 +78,13 @@ static int dm_create(off_t rootfs_blocks, const char *cipher, const char *secret
     dm->open_count = 0;
     dm->flags = DM_SECURE_DATA_FLAG;
     dm->dev = 0;
-    strcpy(dm->name, "rootfs");
+    strcpy(dm->name, name);
     struct dm_target_spec *target = (struct dm_target_spec *) &request_buffer[dm->data_start];
     memset(target, 0, sizeof(struct dm_target_spec));
     target->sector_start = 0;
     target->length = rootfs_blocks;
     strcpy(target->target_type, "crypt");
-    sprintf((char *) &request_buffer[dm->data_start + sizeof(struct dm_target_spec)], "%s %s 0 /dev/loop0 0", cipher, secret);
+    sprintf((char *) &request_buffer[dm->data_start + sizeof(struct dm_target_spec)], "%s %s %d /dev/loop%d 0", cipher, secret, map_ix, map_ix);
     OK_OR_FATAL(ioctl(dm_control, DM_TABLE_LOAD, request_buffer), "Check CONFIG_DM_CRYPT and crypto algs enabled");
 
 
@@ -87,7 +96,7 @@ static int dm_create(off_t rootfs_blocks, const char *cipher, const char *secret
     dm->data_start = sizeof(struct dm_ioctl);
     dm->target_count = 0;
     dm->flags = DM_SECURE_DATA_FLAG;
-    strcpy(dm->name, "rootfs");
+    strcpy(dm->name, name);
     OK_OR_FATAL(ioctl(dm_control, DM_DEV_SUSPEND, request_buffer), "DM_DEV_SUSPEND failed");
 
     close(dm_control);
@@ -208,15 +217,75 @@ static void mount_encrypted_fs(const char *rootfs_path, const char *rootfs_type,
 
     off_t rootfs_blocks = rootfs_size / block_size;
 
-    int loop_fd = losetup(rootfs_fd);
+    int loop_fd = losetup(rootfs_fd, 0);
     close(rootfs_fd);
 
-    dm_create(rootfs_blocks, cipher, secret);
+    dm_create(0, "rootfs", rootfs_blocks, cipher, secret);
 
     OK_OR_FATAL(mount("/dev/dm-0", "/mnt", rootfs_type, MS_RDONLY, NULL), "Expecting %s filesystem on %s", rootfs_type, rootfs_path);
 
     // It's ok to close loop_fd now that the mount happened.
     close(loop_fd);
+}
+
+static void map_encrypted_device(int map_ix, const char *spec, const char *name, const char *cipher, const char *secret)
+{
+    // Wait for the device to appear
+    char path[BLOCK_DEVICE_PATH_LEN];
+    int fd = open_block_device(spec, O_RDONLY, path);
+    off_t size = lseek(fd, 0, SEEK_END);
+    (void) lseek(fd, 0, SEEK_SET);
+
+    int loop_fd = losetup(fd, map_ix);
+    close(fd);
+
+    char dm_name[16];
+    snprintf(dm_name, sizeof(dm_name), "/dev/dm-%d", map_ix);
+
+    char link_name[32];
+    snprintf(link_name, sizeof(link_name), "/dev/mapper/%s", name);
+
+    dm_create(map_ix, name, size, cipher, secret);
+
+    OK_OR_WARN(symlink(link_name, dm_name), "Could not symlink %s -> %s", link_name, dm_name);
+
+    // Hmmmmm.... It's ok to close loop_fd now that the mount happened.
+    close(loop_fd);
+}
+
+static void map_extra_encrypted_devs()
+{
+    for (int ix = 1; ix <= MAX_EXTRA_ENCRYPTED_DEVS; ix++) {
+        char base[12];
+        snprintf(base, sizeof(base), "dm_crypt.%d", ix);
+
+        char path_var[20];
+        char name_var[20];
+        char cipher_var[20];
+        char secret_var[20];
+
+        snprintf(path_var, sizeof(path_var), "%s.path", base);
+        snprintf(name_var, sizeof(name_var), "%s.name", base);
+        snprintf(cipher_var, sizeof(cipher_var), "%s.cipher", base);
+        snprintf(secret_var, sizeof(secret_var), "%s.secret", base);
+
+        const char *path = get_variable_as_string(path_var);
+        const char *name = get_variable_as_string(name_var);
+        const char *cipher = get_variable_as_string(cipher_var);
+        const char *secret = get_variable_as_string(secret_var);
+
+        if (*path != '\0') {
+            if (*name == '\0' ||
+                *cipher == '\0' ||
+                *secret == '\0') {
+                info("Not mapping %s. Make sure that %s.name, %s.cipher, and %s.secret are set",
+                        path, base, base, base);
+                continue;
+            }
+            info("mapping other encrypted block device %s", path);
+            map_encrypted_device(ix, path, name, cipher, secret);
+        }
+    }
 }
 
 static void repl()
@@ -324,6 +393,7 @@ int main(int argc, char *argv[])
 
     // Finalize our setup of the root filesystem
     create_rootdisk_symlinks(resolved_rootfs_path);
+    map_extra_encrypted_devs();
 
     // Switch over to the new root filesystem
     switch_root();
